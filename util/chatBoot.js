@@ -8,143 +8,128 @@ export class ChatBoot {
 
     constructor() {
 
-        this.arraymsg = []
-        this.obj = {}
-
+        this.userStates = {} // substitui arraymsg
         this.client = new Client({
             authStrategy: new LocalAuth(),
             puppeteer: {
-                executablePath: '/usr/bin/chromium-browser', // Chromium do sistema
+                executablePath: '/usr/bin/chromium-browser',
                 headless: true,
-                args: ['--no-sandbox', '--disable-setuid-sandbox']
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-extensions',
+                    '--disable-gpu',
+                    '--single-process',
+                    '--no-zygote'
+                ]
             }
         });
 
-        this.client.on('qr', qr => {
-            qrcode.generate(qr, { small: true })
-        })
+        this.client.on('qr', qr => qrcode.generate(qr, { small: true }))
 
-        this.client.on('ready', () => {
-            console.log('API WHATSAPP CONECTADA !')
-        });
+        this.client.on('ready', () => console.log('API WHATSAPP CONECTADA !'))
 
         this.client.on('message', async msg => {
 
-            if (msg.fromMe) return;
+            if(msg.fromMe) return;
+
+            const from = msg.from;
+            const state = this.userStates[from] || { etapa: 0 };
 
             // Etapa 1: registrar buraco
-            if (msg.body === '!registrarBuraco') {
-                msg.reply('Olá!✌️\n\nEste é um projeto desenvolvido pelos alunos: Matheus Andrade e Gabriel Alves pelo IFMS Nova Andradina \n \n Envie a localização do buraco:🚩')
-                this.arraymsg.push({ mensagem: 'aguardandoLocalização', remetente: msg.from, etapa: 1 })
-            }
-
-            // Etapa 1: receber localização
-            if (this.arraymsg.some(p => p.mensagem == 'aguardandoLocalização' && p.remetente == msg.from && p.etapa == 1)) {
-                if (msg.location) {
-
-                    const responseCidade = await axios.put('https://projeto-vias.vercel.app/verificarCidadePorRua', {
-                        latitude: msg.location.latitude,
-                        longitude: msg.location.longitude
-                    })
-
-                    const response = await axios.get('https://projeto-vias.vercel.app/verificarCidade', {
-                        params: {
-                            latitude: msg.location.latitude,
-                            longitude: msg.location.longitude
-                        }
-                    })
-
-                    if (responseCidade.data == 'Nova Andradina') {
-
-                        this.arraymsg.push({
-                            remetente: msg.from,
-                            latitude: msg.location.latitude,
-                            longitude: msg.location.longitude,
-                            etapa: 2,
-                            valid: true
-                        })
-
-                        msg.body = null
-                        msg.reply(`Localização recebida! Buraco está na ${response.data.nomeRua}`)
-                        msg.reply('Em sua opnião de 1 a 5 qual a gravidade do buraco?')
-
-                    } else {
-                        msg.reply(':(\n\n😓 Lamento!\nInfelizmente estamos operando apenas em Nova Andradina.\nFavor forneça uma localização de Nova Andradina ou digite "Sair" para cancelar!')
-                    }
-                }
+            if(msg.body === '!registrarBuraco') {
+                msg.reply('Olá!✌️\n\nEste é um projeto desenvolvido pelos alunos: Matheus Andrade e Gabriel Alves pelo IFMS Nova Andradina \n \n Envie a localização do buraco:🚩');
+                this.userStates[from] = { etapa: 1, status: 'aguardandoLocalizacao' };
+                return;
             }
 
             // Cancelar operação
-            if (['sair', 'Sair', 'SAIR'].includes(msg.body)) {
-                ['1','2','3','4'].forEach(etapa => {
-                    let index = this.arraymsg.findIndex(p => p.remetente == msg.from && p.etapa == parseInt(etapa))
-                    if (index >= 0) this.arraymsg.splice(index, 1)
-                })
-                msg.reply('Cancelado!')
+            if(['sair', 'Sair', 'SAIR'].includes(msg.body)) {
+                delete this.userStates[from];
+                msg.reply('Cancelado!');
+                return;
+            }
+
+            // Etapa 1: receber localização
+            if(state.etapa === 1 && state.status === 'aguardandoLocalizacao' && msg.location) {
+                try {
+                    const responseCidade = await axios.put('https://projeto-vias.vercel.app/verificarCidadePorRua', {
+                        latitude: msg.location.latitude,
+                        longitude: msg.location.longitude
+                    });
+
+                    const response = await axios.get('https://projeto-vias.vercel.app/verificarCidade', {
+                        params: { latitude: msg.location.latitude, longitude: msg.location.longitude }
+                    });
+
+                    if(responseCidade.data === 'Nova Andradina') {
+                        this.userStates[from] = {
+                            etapa: 2,
+                            latitude: msg.location.latitude,
+                            longitude: msg.location.longitude,
+                            valid: true
+                        };
+                        msg.reply(`Localização recebida! Buraco está na ${response.data.nomeRua}`);
+                        msg.reply('Em sua opnião de 1 a 5 qual a gravidade do buraco?');
+                    } else {
+                        msg.reply(':(\n\n😓 Lamento!\nInfelizmente estamos operando apenas em Nova Andradina.\nFavor forneça uma localização de Nova Andradina ou digite "Sair" para cancelar!');
+                    }
+                } catch(e) {
+                    console.log('Erro ao verificar cidade:', e);
+                    msg.reply('😓 Ocorreu um erro ao verificar a cidade.');
+                }
+                return;
             }
 
             // Etapa 2: gravidade do buraco
-            if (this.arraymsg.some(p => p.remetente == msg.from && p.etapa == 2 && p.valid == true)) {
-                if (['1','2','3','4','5'].includes(msg.body)) {
-                    this.arraymsg.push({ remetente: msg.from, mensagem: msg.body, etapa: 3 })
-                    let etapa2 = this.arraymsg.findIndex(p => p.remetente == msg.from && p.etapa == 2)
-                    this.arraymsg[etapa2].valid = false
-                    msg.reply('Digite uma descrição ou escreva NÃO:')
-                } else if (msg.body != null) {
-                    msg.reply('Número inválido!\nFavor digite um número de 1 a 5!')
+            if(state.etapa === 2 && state.valid) {
+                if(['1','2','3','4','5'].includes(msg.body)) {
+                    this.userStates[from] = {
+                        ...state,
+                        etapa: 3,
+                        gravidade: msg.body,
+                        valid: false
+                    };
+                    msg.reply('Digite uma descrição ou escreva NÃO:');
+                } else if(msg.body != null) {
+                    msg.reply('Número inválido!\nFavor digite um número de 1 a 5!');
                 }
+                return;
             }
 
-            // Etapa 3: descrição do buraco
-            if (this.arraymsg.some(p => p.remetente == msg.from && p.mensagem && p.etapa == 3)) {
-                let mensagemLower = msg.body.toLowerCase()
-                if (['não','nao','n'].includes(mensagemLower)) {
-                    this.arraymsg.push({ mensagem: 'SEM DESCRIÇÃO', remetente: msg.from, etapa: 4 })
-                } else if (!['1','2','3','4','5'].includes(msg.body)) {
-                    this.arraymsg.push({ mensagem: msg.body, remetente: msg.from, etapa: 4 })
+            // Etapa 3: descrição
+            if(state.etapa === 3) {
+                let descricao = ['não','nao','n'].includes(msg.body.toLowerCase()) ? 'SEM DESCRIÇÃO' : msg.body;
+
+                const reportObj = {
+                    idDispositivo: from,
+                    descricao,
+                    latitude: state.latitude,
+                    longitude: state.longitude,
+                    criticidade: state.gravidade
+                };
+
+                try {
+                    const response = await axios.post('https://projeto-vias.vercel.app/report', reportObj);
+
+                    if(response.status === 208) {
+                        msg.reply(`:) Esse buraco já foi informado por outro usuário, mas aumentamos a prioridade do seu reporte.\nObrigado por colaborar!\n\nTotal de reports desse buraco: ${response.data.confirmacoes.confirmacoes}`);
+                    } else if(response.status === 201) {
+                        msg.reply('😉 Seu report foi adicionado com sucesso! Agradecemos por sua participação!');
+                    }
+                } catch(error) {
+                    console.log('Erro na API interna:', error);
+                    msg.reply('😓 Ocorreu um erro ao enviar seu reporte. Tente novamente mais tarde.');
                 }
 
-                if (this.arraymsg.some(p => p.remetente == msg.from && p.etapa == 4)) {
-
-                    let item1 = this.arraymsg.find(p => p.remetente == msg.from && p.etapa == 4)
-                    let item2 = this.arraymsg.find(p => p.remetente == msg.from && p.etapa == 2)
-                    let item3 = this.arraymsg.find(p => p.remetente == msg.from && p.etapa == 3)
-
-                    // limpar array de mensagens do usuário
-                    [1,2,3,4].forEach(etapa => {
-                        let index = this.arraymsg.findIndex(p => p.remetente == msg.from && p.etapa == etapa)
-                        if (index >= 0) this.arraymsg.splice(index, 1)
-                    })
-
-                    this.obj = {
-                        idDispositivo: item1.remetente,
-                        descricao: item1.mensagem,
-                        latitude: item2.latitude,
-                        longitude: item2.longitude,
-                        criticidade: item3.mensagem
-                    }
-
-                    try {
-                        const response = await axios.post('https://projeto-vias.vercel.app/report', this.obj)
-
-                        if (response) {
-                            if (response.status == 208) {
-                                msg.reply(`:) Esse buraco já foi informado por outro usuário, mas aumentamos a prioridade do seu reporte.\nObrigado por colaborar!\n\nTotal de reports desse buraco: ${response.data.confirmacoes.confirmacoes}`)
-                            } else if (response.status == 201) {
-                                msg.reply('😉 Seu report foi adicionado com sucesso! Agradecemos por sua participação!')
-                            }
-                        }
-
-                    } catch (error) {
-                        console.log('DEU ERRO NA API INTERNA DO SERVIDOR!', error)
-                        msg.reply('😓 Ocorreu um erro ao enviar seu reporte. Tente novamente mais tarde.')
-                    }
-                }
+                delete this.userStates[from]; // finaliza fluxo
+                return;
             }
 
-        })
+        });
 
-        this.client.initialize()
+        this.client.initialize();
     }
 
 }
