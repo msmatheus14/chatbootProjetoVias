@@ -43,7 +43,7 @@ export class ChatBoot {
                 if(msg.location){
 
 
-                    const responseCidade = await axios.put('http://localhost:3000/verificarCidadePorRua', {
+                    const responseCidade = await axios.put('https://projeto-vias.vercel.app/verificarCidadePorRua', {
                      
                             latitude: msg.location.latitude,
                             longitude: msg.location.longitude
@@ -52,7 +52,7 @@ export class ChatBoot {
 
                     console.log(responseCidade.data)
 
-                    const response = await axios.get('http://localhost:3000/verificarCidade', {
+                    const response = await axios.get('https://projeto-vias.vercel.app/verificarCidade', {
                         params: {
                             latitude: msg.location.latitude,
                             longitude: msg.location.longitude
@@ -151,7 +151,7 @@ export class ChatBoot {
                     }
 
                     try {
-                        const response = await axios.post('http://localhost:3000/report', this.obj)
+                        const response = await axios.post('https://projeto-vias.vercel.app/report', this.obj)
             
                         if(response){
 
